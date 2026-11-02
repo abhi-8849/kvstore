@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package kv.api.v1;
+
+option go_package = "kvstore/proto/api/v1;apipb";
+
+// KVService provides a strongly consistent, distributed key-value store.
+// All reads and writes are strictly linearizable by default, ensuring that once a write
+// completes, all subsequent reads will see that exact value, regardless of which node
+// serves the request.
+//
+// The underlying consensus is managed by HashiCorp Raft, and data is durably
+// stored using PebbleDB.
+service KVService {
+  // Get retrieves the value for a specific key.
+  // By default, this performs a linearizable read by verifying the Leader's status
+  // via a Raft barrier before querying the local state store.
+  // Returns OK with found=false if the key does not exist.
+  //
+  // Errors:
+  // - INVALID_ARGUMENT: key is empty or exceeds 1024 bytes.
+  rpc Get(GetRequest) returns (GetResponse);
+
+  // Put creates a new key-value pair or overwrites an existing one.
+  // This operation is replicated through the Raft log and is strongly consistent.
+  // It is idempotent when retried with the same request_id.
+  //
+  // Errors:
+  // - INVALID_ARGUMENT: key is empty/too long, or value exceeds size limits.
+  rpc Put(PutRequest) returns (PutResponse);
+
+  // Delete removes a key-value pair via a replicated Raft command.
+  // This operation is idempotent; deleting an already missing key returns OK with deleted=false.
+  //
+  // Errors:
+  // - INVALID_ARGUMENT: key is empty or exceeds 1024 bytes.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+
+  // CompareAndSwap performs a strongly consistent atomic check-and-set operation.
+  // It evaluates the condition and applies the write within a single, atomic Raft command.
+  //
+  // Errors:
+  // - INVALID_ARGUMENT: key is empty or exceeds 1024 bytes.
+  // - FAILED_PRECONDITION: the current value does not match expected value.
+  rpc CompareAndSwap(CompareAndSwapRequest) returns (CompareAndSwapResponse);
+
+  // PrefixScan returns a stream of all key-value pairs matching the given prefix.
+  // Like Get, this operation is strictly linearizable by default.
+  // Results are always returned in lexicographic order.
+  //
+  // Errors:
+  // - INVALID_ARGUMENT: prefix is empty.
+  rpc PrefixScan(PrefixScanRequest) returns (stream PrefixScanResponse);
+}
+
+// RequestID is a client-generated identifier used for idempotency.
+message RequestID {
+  string client_id = 1;
+  string request_id = 2;
+}
+
+// --- Request/Response Messages ---
+
+message GetRequest {
+  // The exact key to fetch. (Required)
+  string key = 1;
+
+  // If true, bypasses the Raft linearizability check (Leader Verify + Barrier)
+  // and reads directly from the local Pebble engine.
+  // This drastically reduces latency but may return stale data if the node
+  // has fallen behind the leader.
+  bool allow_stale = 2;
+}
+
+message GetResponse {
+  // The raw bytes of the stored value. Empty if found=false.
+  bytes value = 1;
+
+  // True if the key existed in the database, false otherwise.
+  bool found = 2;
+}
+
+message PutRequest {
+  // A client-generated UUID/identifier. If a network partition forces a client retry,
+  // the server uses this ID against the Pebble Dedup table to ensure the
+  // Raft log is not applied twice. (Required)
+  RequestID id = 1;
+
+  // The key to insert or overwrite. (Required)
+  string key = 2;
+
+  // The data to store. Unset is rejected; 0-byte (empty) is allowed.
+  optional bytes value = 3;
+}
+
+message PutResponse {
+  // Empty. A successful gRPC OK status guarantees the operation was
+  // durably committed to the Raft log across a quorum of nodes.
+}
+
+message DeleteRequest {
+  // A client-generated UUID/identifier. If a network partition forces a client retry,
+  // the server uses this ID against the Pebble Dedup table to ensure the
+  // Raft log is not applied twice. (Required)
+  RequestID id = 1;
+
+  // The key to remove. (Required)
+  string key = 2;
+}
+
+message DeleteResponse {
+  // True if the key existed and was deleted.
+  // False if the key was already missing before this operation.
+  bool deleted = 1;
+}
+
+message CompareAndSwapRequest {
+  // A client-generated UUID/identifier. If a network partition forces a client retry,
+  // the server uses this ID against the Pebble Dedup table to ensure the
+  // Raft log is not applied twice. (Required)
+  RequestID id = 1;
+
+  // The key to atomically evaluate and modify. (Required)
+  string key = 2;
+
+  // The expected current value.
+  // If explicitly unset, the operation will only succeed if the key DOES NOT exist.
+  optional bytes expected = 3;
+
+  // The new value to write if the check succeeds.
+  // If explicitly unset, the operation acts as a Compare-And-Delete.
+  optional bytes new_value = 4;
+}
+
+message CompareAndSwapResponse {
+  // True if the expected value matched and the new_value was committed to Raft.
+  // False if the expected value did not match (client should re-fetch and try again).
+  bool swapped = 1;
+}
+
+message PrefixScanRequest {
+  // The string prefix to match. (Required)
+  string prefix = 1;
+
+  // If true, bypasses the Raft linearizability check.
+  bool allow_stale = 2;
+
+  // The maximum number of keys to return before closing the stream.
+  // A value of 0 means the server will stream all matching keys until the prefix ends.
+  int32 limit = 3;
+
+  // Used for pagination. If provided, the scan will exclusively start scanning
+  // keys that are strictly greater than this value.
+  string start_after = 4;
+}
+
+message PrefixScanResponse {
+  // The matched key, excluding internal system namespaces (e.g., "d/").
+  string key = 1;
+
+  // The stored raw value.
+  bytes value = 2;
+}
