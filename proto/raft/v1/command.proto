@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+// The Protobuf namespace for internal cluster communication
+package kv.raft.v1;
+
+// The Go import path (must match your folders) and the Go package name (raftpb)
+option go_package = "kvstore/proto/raftcmd/v1;raftpb";
+
+// Command is the definitive payload replicated via Raft and applied to the FSM.
+message Command {
+  // The client-generated UUID for idempotency. The FSM checks this against
+  // the Pebble dedup table (m/ namespace) before applying the operation.
+  string request_id = 1;
+
+  // The Unix timestamp (in nanoseconds) when the Leader proposed this command.
+  // Essential for replication lag monitoring and deterministic time calculations.
+  int64 timestamp_ns = 2;
+
+  // The specific mutation to apply to the state machine.
+  oneof operation {
+    PutOp put = 3;
+    DeleteOp delete = 4;
+    CasOp cas = 5;
+  }
+}
+
+// Internal operations strip away network-level fields and only contain
+// the raw data needed to mutate the PebbleDB "d/" namespace.
+
+message PutOp {
+  string key = 1;
+  bytes value = 2;
+}
+
+message DeleteOp {
+  string key = 1;
+}
+
+message CasOp {
+  string key = 1;
+
+  // Explicitly optional so the FSM can differentiate between
+  // "key must not exist" (unset) and "key has empty value" (0 bytes).
+  optional bytes old_value = 2;
+  optional bytes new_value = 3;
+}

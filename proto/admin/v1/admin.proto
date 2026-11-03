@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package kv.admin.v1;
+
+option go_package = "kvstore/proto/admin/v1;adminpb";
+
+// AdminService provides the Control Plane for the distributed Key-Value store.
+// It exposes HashiCorp Raft cluster management operations.
+//
+// SECURITY: This service should only be exposed to internal network operators,
+// Kubernetes operators, or admin CLI tools. It must NOT be exposed to public clients.
+//
+// ROUTING: Mutating RPCs (AddNode, RemoveNode) MUST be executed on the Raft Leader.
+// If sent to a Follower, the server will return a FAILED_PRECONDITION error and
+// populate `leader_address` in the response for client redirection.
+service AdminService {
+  // AddNode introduces a new node to the cluster or updates an existing node's role.
+  // - Adding a ROLE_VOTER increases the cluster's quorum requirement.
+  // - Adding a ROLE_NON_VOTER creates a read-replica that does not affect quorum.
+  // - Calling this on an existing node safely promotes or demotes it.
+  rpc AddNode(AddNodeRequest) returns (AddNodeResponse);
+
+  // RemoveNode forcefully evicts a node (Voter or Non-Voter) from the Raft consensus.
+  // This shrinks the cluster and dynamically recalculates quorum.
+  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+
+  // ClusterStatus returns the current topology of the Raft cluster,
+  // including the active Leader and the health/role of all known peers.
+  // This can be queried against any node (Leader or Follower).
+  rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
+}
+
+// NodeRole defines a node's participation level in Raft consensus.
+enum NodeRole {
+  ROLE_UNSPECIFIED = 0;
+
+  // A Voter participates in Raft elections and log replication quorum.
+  // Affects write latency and cluster fault tolerance.
+  ROLE_VOTER = 1;
+
+  // A Non-Voter receives log replication but has no voting rights.
+  // Used for safe background catch-up (warm-up) or scaling read capacity.
+  ROLE_NON_VOTER = 2;
+}
+
+message AddNodeRequest {
+  // The permanent, unique identifier of the node (e.g., Kubernetes Pod Name: "kv-4").
+  string node_id = 1;
+
+  // The internal TCP address used exclusively for HashiCorp Raft communication.
+  // (e.g., "10.0.1.5:7000" or "kv-4.kv-internal.default.svc.cluster.local:7000").
+  string raft_address = 2;
+
+  // The desired state of the node.
+  NodeRole role = 3;
+}
+
+message AddNodeResponse {
+  // If the request fails because the target node is a Follower,
+  // this field contains the network address of the actual Raft Leader.
+  // The client should seamlessly retry the request against this address.
+  string leader_address = 1;
+}
+
+message RemoveNodeRequest {
+  // The unique identifier of the node to evict.
+  string node_id = 1;
+}
+
+message RemoveNodeResponse {
+  // Populated with the Leader's address if the request was sent to a Follower.
+  string leader_address = 1;
+}
+
+message ClusterStatusRequest {
+  // Empty. (Future expansion: add flags for filtering or detailed metrics).
+}
+
+message ClusterStatusResponse {
+  // The Node ID of the current Raft Leader. Empty if the cluster is in an election.
+  string leader_id = 1;
+
+  // The Raft network address of the current Leader.
+  string leader_address = 2;
+
+  // Represents a single peer in the Raft cluster.
+  message Node {
+    string id = 1;
+    string address = 2;
+    NodeRole role = 3;
+  }
+
+  // The complete list of all Voters and Non-Voters currently known to the cluster.
+  repeated Node nodes = 3;
+}
