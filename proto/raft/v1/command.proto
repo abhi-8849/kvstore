@@ -4,7 +4,7 @@ syntax = "proto3";
 package kv.raft.v1;
 
 // The Go import path (must match your folders) and the Go package name (raftpb)
-option go_package = "kvstore/proto/raftcmd/v1;raftpb";
+option go_package = "kvstore/gen/raft/v1;raftpb";
 
 // Command is the definitive payload replicated via Raft and applied to the FSM.
 message Command {
