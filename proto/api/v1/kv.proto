@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package kv.api.v1;
 
-option go_package = "kvstore/proto/api/v1;apipb";
+option go_package = "kvstore/gen/api/v1;kvpb";
 
 // KVService provides a strongly consistent, distributed key-value store.
 // All reads and writes are strictly linearizable by default, ensuring that once a write

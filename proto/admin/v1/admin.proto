@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package kv.admin.v1;
 
-option go_package = "kvstore/proto/admin/v1;adminpb";
+option go_package = "kvstore/gen/admin/v1;adminpb";
 
 // AdminService provides the Control Plane for the distributed Key-Value store.
 // It exposes HashiCorp Raft cluster management operations.
