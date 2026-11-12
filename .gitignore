@@ -1,33 +1,98 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
+# ==============================================================================
+# Go Binaries & Build Artifacts
+# ==============================================================================
+# Compiled binaries (macOS/Linux binaries have no extension; standard convention is bin/)
+/bin/
+/dist/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binary, built with `go test -c`
+# ==============================================================================
+# Go Test, Coverage & Profiling
+# ==============================================================================
 *.test
-
-# Code coverage profiles and other test artifacts
 *.out
-coverage.*
-!coverage.go
 *.coverprofile
 profile.cov
+coverage.*
+!coverage.go
+*.prof
+*.pprof
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
+# ==============================================================================
+# Go Workspace & Dependencies
+# ==============================================================================
 go.work
 go.work.sum
+# vendor/
 
-# env file
+# ==============================================================================
+# Protobuf & Buf Tooling
+# ==============================================================================
+# Buf local cache and build artifacts
+.buf/
+*.binpb
+*.desc
+
+# ==============================================================================
+# Python: Bytecode, Caches & Virtual Envs
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Packaging & distribution
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+
+# Testing & linting caches (pytest, mypy, ruff, tox, coverage)
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Jupyter / Notebooks
+.ipynb_checkpoints/
+
+# ==============================================================================
+# Local Environment & Secrets
+# ==============================================================================
 .env
+*.local.env
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# ==============================================================================
+# Documents & Binary Assets
+# ==============================================================================
+*.pdf
+
+# ==============================================================================
+# Agent & Assistant Files
+# ==============================================================================
+CLAUDE.md
+
+# ==============================================================================
+# IDE & Operating System Files
+# ==============================================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
