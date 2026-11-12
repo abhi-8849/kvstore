@@ -1,0 +1,72 @@
+// Raft log command definitions for the key-value store FSM.
+//
+// These messages are serialized into Raft log entries by the leader and
+// applied in log order by every node's finite state machine (FSM).
+//
+// Compatibility: this schema is frozen once released. Only add new fields;
+// never renumber or remove existing ones.
+
+syntax = "proto3";
+
+package kv.raft.v1;
+
+option go_package = "kvstore/gen/raft/v1;raftpb";
+
+// ---------- Command ----------
+
+// Command is a single entry in the Raft log representing a validated client write.
+//
+// The leader constructs it from a client request after validation.
+// Every node's FSM applies commands sequentially in log order.
+message Command {
+  // Client-generated UUID for deduplication.
+  // The FSM indexes this under the key "r/<request_id>".
+  string request_id = 1;
+
+  // Wall-clock timestamp set by the leader (nanoseconds since epoch).
+  // This is the only clock source the FSM may use.
+  int64 timestamp_ns = 2;
+
+  // The write operation to apply. Exactly one must be set.
+  oneof operation {
+    // Create or overwrite a key-value pair.
+    PutOp put = 3;
+
+    // Remove a key from the store.
+    DeleteOp delete = 4;
+
+    // Conditionally replace a key's value.
+    CasOp cas = 5;
+  }
+}
+
+// ---------- Operations ----------
+
+// PutOp creates or overwrites a key-value pair.
+message PutOp {
+  // Key to write.
+  string key = 1;
+
+  // Value to store. May be empty (zero-length).
+  bytes value = 2;
+}
+
+// DeleteOp removes a key from the store.
+message DeleteOp {
+  // Key to remove.
+  string key = 1;
+}
+
+// CasOp atomically replaces a key's value only if it currently matches old_value.
+message CasOp {
+  // Key to conditionally update.
+  string key = 1;
+
+  // The value the key must currently hold for the swap to proceed.
+  // Unset means the key must be absent; empty bytes matches an empty value.
+  optional bytes old_value = 2;
+
+  // The value to write when the current value matches old_value.
+  // Always set by the leader (the client API requires it).
+  optional bytes new_value = 3;
+}

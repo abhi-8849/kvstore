@@ -1,0 +1,124 @@
+// Cluster administration API for the key-value store.
+//
+// Manages Raft membership (add, promote, remove nodes) and cluster health.
+// Served on the admin listener only; never expose to external clients.
+
+syntax = "proto3";
+
+package kv.admin.v1;
+
+option go_package = "kvstore/gen/admin/v1;adminpb";
+
+// AdminService provides cluster membership management RPCs.
+//
+// AddNode and RemoveNode must be called on the leader. A follower returns
+// UNAVAILABLE with the leader's gRPC address in the x-leader-addr trailer.
+// ClusterStatus can be served by any node.
+//
+// Leadership transfer is handled internally via Raft on SIGTERM, not via RPC.
+//
+// Common error codes for mutating RPCs:
+//   - UNAVAILABLE with x-leader-addr trailer: caller hit a follower; retry at that address.
+//   - UNAVAILABLE without trailer: no leader elected; retry with backoff.
+//   - INTERNAL: unexpected server-side failure; details in server logs only.
+service AdminService {
+  // AddNode adds a new node to the cluster or changes the role of an existing one.
+  //
+  // Use this to promote a non-voter to voter once it has caught up with the log.
+  // Idempotent: re-adding the same node with the same role is a no-op.
+  // Returns INVALID_ARGUMENT if node_id is empty, raft_address is not host:port,
+  // or role is ROLE_UNSPECIFIED.
+  rpc AddNode(AddNodeRequest) returns (AddNodeResponse);
+
+  // RemoveNode removes a node (voter or non-voter) from the cluster.
+  //
+  // Idempotent: removing an already-absent node is a no-op.
+  // Returns INVALID_ARGUMENT if node_id is empty.
+  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+
+  // ClusterStatus returns the current leader and all cluster members.
+  //
+  // Can be served by any node regardless of leadership.
+  rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
+}
+
+// ---------- Enums ----------
+
+// NodeRole defines a node's participation level in Raft consensus.
+enum NodeRole {
+  // Default value. Invalid in requests; used as a sentinel.
+  ROLE_UNSPECIFIED = 0;
+
+  // Full participant: votes in elections and counts toward the commit quorum.
+  ROLE_VOTER = 1;
+
+  // Receives log replication but does not vote or count toward quorum.
+  // Useful for new nodes catching up before promotion.
+  ROLE_NON_VOTER = 2;
+}
+
+// ---------- AddNode ----------
+
+// AddNodeRequest is the input for the AddNode RPC.
+message AddNodeRequest {
+  // Unique node identifier. Required. Typically the pod name in Kubernetes.
+  string node_id = 1;
+
+  // Raft transport address in host:port format. Required.
+  string raft_address = 2;
+
+  // Role to assign to the node. Required. Must be VOTER or NON_VOTER.
+  NodeRole role = 3;
+}
+
+// AddNodeResponse is the result of the AddNode RPC.
+// An OK status means the configuration change was committed to the Raft log.
+message AddNodeResponse {
+  // Deprecated. Leader redirects use the x-leader-addr trailer instead.
+  string leader_address = 1;
+}
+
+// ---------- RemoveNode ----------
+
+// RemoveNodeRequest is the input for the RemoveNode RPC.
+message RemoveNodeRequest {
+  // ID of the node to remove. Required.
+  string node_id = 1;
+}
+
+// RemoveNodeResponse is the result of the RemoveNode RPC.
+// An OK status means the configuration change was committed to the Raft log.
+message RemoveNodeResponse {
+  // Deprecated. Leader redirects use the x-leader-addr trailer instead.
+  string leader_address = 1;
+}
+
+// ---------- ClusterStatus ----------
+
+// ClusterStatusRequest is the input for the ClusterStatus RPC.
+// Takes no parameters.
+message ClusterStatusRequest {}
+
+// ClusterStatusResponse is the result of the ClusterStatus RPC.
+message ClusterStatusResponse {
+  // Node describes a single member of the cluster.
+  message Node {
+    // Unique identifier for this node.
+    string id = 1;
+
+    // Raft transport address in host:port format.
+    string address = 2;
+
+    // Current role of the node in consensus.
+    NodeRole role = 3;
+  }
+
+  // ID of the current Raft leader. Empty if an election is in progress.
+  string leader_id = 1;
+
+  // Raft address of the current leader. Empty if an election is in progress.
+  string leader_address = 2;
+
+  // All cluster members (voters and non-voters) in the current configuration.
+  repeated Node nodes = 3;
+}

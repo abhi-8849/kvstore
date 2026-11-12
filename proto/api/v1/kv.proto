@@ -1,0 +1,174 @@
+// Key-value store public API.
+//
+// All writes go through the Raft leader; reads are linearizable by default.
+// Set allow_stale = true to read from any node (faster, but may be stale).
+
+syntax = "proto3";
+
+package kv.api.v1;
+
+option go_package = "kvstore/gen/api/v1;kvpb";
+
+// KVService exposes CRUD and scan operations on a replicated key-value store.
+//
+// Writes are served by the leader only; reads are linearizable unless
+// allow_stale is set, in which case any node may answer.
+//
+// Common error codes:
+//   - UNAVAILABLE with x-leader-addr trailer: caller hit a follower; retry at that address.
+//   - UNAVAILABLE without trailer: no leader elected or write outcome unknown; retry with backoff
+//     (reuse the same request_id for writes).
+//   - INTERNAL: unexpected server-side failure; details in server logs only.
+//
+// Idempotency:
+//   Every mutating RPC accepts a client-generated request_id (UUID).
+//   Use one fresh UUID per logical operation, and reuse it across retries.
+//   The server caches results for 10 minutes to prevent duplicate application.
+service KVService {
+  // Get returns the value for a single key.
+  //
+  // Returns OK with found=false if the key does not exist.
+  // Returns INVALID_ARGUMENT if the key is empty or exceeds 1024 bytes.
+  rpc Get(GetRequest) returns (GetResponse);
+
+  // Put creates or overwrites a key-value pair.
+  //
+  // Idempotent when retried with the same request_id.
+  // Returns INVALID_ARGUMENT if request_id is malformed, key is empty or
+  // exceeds 1024 bytes, or value is unset or exceeds 1 MiB.
+  rpc Put(PutRequest) returns (PutResponse);
+
+  // Delete removes a key from the store.
+  //
+  // Returns OK with deleted=false if the key was already absent.
+  // Idempotent when retried with the same request_id.
+  // Returns INVALID_ARGUMENT if request_id is malformed, or key is empty
+  // or exceeds 1024 bytes.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+
+  // CompareAndSwap atomically updates a key only if its current value matches expected.
+  //
+  // Returns OK with swapped=false on a mismatch; no write occurs.
+  // Idempotent when retried with the same request_id.
+  // Returns INVALID_ARGUMENT if request_id is malformed, key is empty or
+  // exceeds 1024 bytes, new_value is unset, or expected/new_value exceeds 1 MiB.
+  rpc CompareAndSwap(CompareAndSwapRequest) returns (CompareAndSwapResponse);
+
+  // PrefixScan streams key-value pairs whose keys share a common prefix.
+  //
+  // Results are returned in lexicographic key order, up to limit.
+  // To resume a broken stream, set start_after to the last key received.
+  // Returns INVALID_ARGUMENT if prefix is empty or exceeds 1024 bytes,
+  // or limit is outside the range [1, 10000].
+  rpc PrefixScan(PrefixScanRequest) returns (stream PrefixScanResponse);
+}
+
+// ---------- Get ----------
+
+// GetRequest is the input for the Get RPC.
+message GetRequest {
+  // Key to look up. Must be 1–1024 bytes.
+  string key = 1;
+
+  // When true, any node may serve the read from local state.
+  // The response may be stale but avoids a round-trip to the leader.
+  bool allow_stale = 2;
+}
+
+// GetResponse is the result of the Get RPC.
+message GetResponse {
+  // The stored value. Empty when found is false.
+  bytes value = 1;
+
+  // True if the key exists in the store.
+  bool found = 2;
+}
+
+// ---------- Put ----------
+
+// PutRequest is the input for the Put RPC.
+message PutRequest {
+  // Client-generated UUID for idempotency. Reuse across retries.
+  string request_id = 1;
+
+  // Key to write. Must be 1–1024 bytes.
+  string key = 2;
+
+  // Value to store. Required (empty bytes allowed). Max 1 MiB.
+  optional bytes value = 3;
+}
+
+// PutResponse is the result of the Put RPC.
+// An empty response means the write is durable on a quorum and applied on the leader.
+message PutResponse {}
+
+// ---------- Delete ----------
+
+// DeleteRequest is the input for the Delete RPC.
+message DeleteRequest {
+  // Client-generated UUID for idempotency. Reuse across retries.
+  string request_id = 1;
+
+  // Key to remove. Must be 1–1024 bytes.
+  string key = 2;
+}
+
+// DeleteResponse is the result of the Delete RPC.
+message DeleteResponse {
+  // True if the key existed and was removed. False if it was already absent.
+  bool deleted = 1;
+}
+
+// ---------- CompareAndSwap ----------
+
+// CompareAndSwapRequest is the input for the CompareAndSwap RPC.
+message CompareAndSwapRequest {
+  // Client-generated UUID for idempotency. Reuse across retries.
+  string request_id = 1;
+
+  // Key to conditionally update. Must be 1–1024 bytes.
+  string key = 2;
+
+  // The value the key must currently hold for the swap to proceed.
+  // Leave unset to require that the key does not exist. Max 1 MiB.
+  optional bytes expected = 3;
+
+  // The value to write when the current value matches expected.
+  // Required (empty bytes allowed). Max 1 MiB.
+  bytes new_value = 4;
+}
+
+// CompareAndSwapResponse is the result of the CompareAndSwap RPC.
+message CompareAndSwapResponse {
+  // True if the value matched and the new value was written.
+  // False on mismatch; the key is left unchanged.
+  bool swapped = 1;
+}
+
+// ---------- PrefixScan ----------
+
+// PrefixScanRequest is the input for the PrefixScan RPC.
+message PrefixScanRequest {
+  // Only keys starting with this prefix are returned. Must be 1–1024 bytes.
+  string prefix = 1;
+
+  // When true, any node may serve the read from local state.
+  // The response may be stale but avoids a round-trip to the leader.
+  bool allow_stale = 2;
+
+  // Maximum number of key-value pairs to return. Required, range [1, 10000].
+  int32 limit = 3;
+
+  // Resume token: return only keys lexicographically after this value.
+  // Leave empty to start from the beginning of the prefix range.
+  string start_after = 4;
+}
+
+// PrefixScanResponse is a single key-value pair streamed by PrefixScan.
+message PrefixScanResponse {
+  // The matched key.
+  string key = 1;
+
+  // The value stored under the key.
+  bytes value = 2;
+}
